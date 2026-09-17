@@ -33,6 +33,10 @@
 #include <mach/mach_time.h>
 #include <os/tsd.h>
 
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 60
+#endif
+
 #pragma mark -
 #pragma mark _os_lock_base_t
 
@@ -481,21 +485,18 @@ _Static_assert(OS_UNFAIR_LOCK_ADAPTIVE_SPIN ==
 				OS_UNFAIR_LOCK_ADAPTIVE_SPIN)
 #define OS_UNFAIR_LOCK_ALLOW_ANONYMOUS_OWNER 0x01000000u
 
-
 OS_NOINLINE OS_NORETURN OS_COLD
 void
 _os_unfair_lock_recursive_abort(os_lock_owner_t owner)
 {
-	__LIBPLATFORM_CLIENT_CRASH__(owner, "Trying to recursively lock an "
-			"os_unfair_lock");
+	__LIBPLATFORM_CLIENT_CRASH__(owner, "Trying to recursively lock an os_unfair_lock");
 }
 
 OS_NOINLINE OS_NORETURN OS_COLD
 void
 _os_unfair_lock_unowned_abort(os_lock_owner_t owner)
 {
-	__LIBPLATFORM_CLIENT_CRASH__(owner, "Unlock of an os_unfair_lock not "
-			"owned by current thread");
+	__LIBPLATFORM_CLIENT_CRASH__(owner, "Unlock of an os_unfair_lock not owned by current thread");
 }
 
 OS_NOINLINE OS_NORETURN OS_COLD
@@ -548,7 +549,6 @@ _retry:
 			}
 		}
 		if (ret > 0) {
-			// If there are more waiters, unset nowaiters bit when acquiring lock
 			waiters_mask = OS_ULOCK_NOWAITERS_BIT;
 		}
 	}
@@ -614,8 +614,7 @@ os_unfair_lock_trylock(os_unfair_lock_t lock)
 {
 	_os_unfair_lock_t l = (_os_unfair_lock_t)lock;
 	os_lock_owner_t self = _os_lock_owner_get_self();
-	bool r = os_atomic_cmpxchg(&l->oul_value, OS_LOCK_NO_OWNER, self, acquire);
-	return r;
+	return os_atomic_cmpxchg(&l->oul_value, OS_LOCK_NO_OWNER, self, acquire);
 }
 
 void
