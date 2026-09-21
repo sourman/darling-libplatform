@@ -79,11 +79,21 @@ static const unsigned long mask80 = 0x8080808080808080;
 		    return (p - str + x);	\
 	} while (0)
 
+__attribute__((used)) static const char strlen_sentinel_guard_v1[] =
+	"strlen_sentinel_guard_v1";
+
 size_t
 _platform_strlen(const char *str)
 {
 	const char *p;
 	const unsigned long *lp;
+
+	/*
+	 * Unslid Mach-O / IOKit sentinels (0x501004) are not C strings.
+	 * Real dylib strings live in ELF/Mach maps (~0x7f..) or high heaps.
+	 */
+	if (str == NULL || (uintptr_t)str < 0x1000000ul)
+		return (0);
 
 	/* Skip the first few bytes until we have an aligned p */
 	for (p = str; (uintptr_t)p & LONGPTR_MASK; p++)
