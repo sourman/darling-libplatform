@@ -35,6 +35,63 @@
 #if !_PLATFORM_OPTIMIZED_MEMMOVE
 
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+static int
+memmove_src_unmapped(const void *src, size_t length)
+{
+	unsigned char vec;
+	uintptr_t last;
+
+	if (src == NULL || length < 4096)
+		return 0;
+	last = (uintptr_t)src + length - 1;
+	if (mincore((void *)(last & ~(uintptr_t)0xfff), 4096, &vec) == 0)
+		return 0;
+	return 1;
+}
+
+static void
+memmove_log_caller(void *dst, const void *src, size_t length)
+{
+	static int logged;
+	int fd;
+	unsigned long ra0 = 0, ra1 = 0, fp = 0;
+	char buf[96];
+	char *p = buf;
+	const char *hexd = "0123456789abcdef";
+	unsigned long vals[5];
+	int v, i;
+
+	if (logged)
+		return;
+	logged = 1;
+	ra0 = (unsigned long)__builtin_return_address(0);
+	__asm__ volatile ("mov %%rbp, %0" : "=r"(fp));
+	if (fp > 0x100000000ull) {
+		unsigned long prev = *(unsigned long *)fp;
+		if (prev > 0x100000000ull)
+			ra1 = *(unsigned long *)(prev + 8);
+	}
+	vals[0] = ra0;
+	vals[1] = ra1;
+	vals[2] = (unsigned long)dst;
+	vals[3] = (unsigned long)src;
+	vals[4] = (unsigned long)length;
+	for (v = 0; v < 5; v++) {
+		for (i = 15; i >= 0; i--)
+			*p++ = hexd[(vals[v] >> (i * 4)) & 0xf];
+		*p++ = ' ';
+	}
+	*p++ = '\n';
+	fd = open("/tmp/memmove-caller.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+	if (fd >= 0) {
+		write(fd, buf, (size_t)(p - buf));
+		close(fd);
+	}
+}
 
 /*
  * sizeof(word) MUST BE A POWER OF TWO
@@ -60,6 +117,16 @@ _platform_memmove(void *dst0, const void *src0, size_t length)
 
 	if (length == 0 || dst == src)		/* nothing to do */
 		goto done;
+
+	/*
+	 * A copy whose last source byte is not mapped is the network helper's
+	 * crash in the byte loop below (movb (%rax), %cl). Skip it and keep
+	 * the process up. The caller is logged once.
+	 */
+	if (memmove_src_unmapped(src0, length)) {
+		memmove_log_caller(dst0, src0, length);
+		goto done;
+	}
 
 	/*
 	 * Macros: loop-t-times; and loop-t-times, t>0
